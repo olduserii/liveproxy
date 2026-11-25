@@ -632,8 +632,8 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
             if ([ud objectForKey:kFloatingBtnPosXKey] && [ud objectForKey:kFloatingBtnPosYKey]) {
                 CGFloat x = [ud doubleForKey:kFloatingBtnPosXKey];
                 CGFloat y = [ud doubleForKey:kFloatingBtnPosYKey];
-                btn.center = CGPointMake(MIN(MAX(28, x), win.bounds.size.width - 28),
-                                         MIN(MAX(64, y), win.bounds.size.height - 64));
+                btn.center = CGPointMake(MIN(MAX((CGFloat)28.0, x), win.bounds.size.width - (CGFloat)28.0),
+                                         MIN(MAX((CGFloat)64.0, y), win.bounds.size.height - (CGFloat)64.0));
             }
             btn.hidden = [ud boolForKey:kFloatingBtnHiddenKey];
 
@@ -673,8 +673,8 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (!superview) return;
     CGPoint trans = [pan translationInView:superview];
     CGPoint center = self.floatingButton.center;
-    center.x = MIN(MAX(28, center.x + trans.x), superview.bounds.size.width - 28);
-    center.y = MIN(MAX(64, center.y + trans.y), superview.bounds.size.height - 64);
+    center.x = MIN(MAX((CGFloat)28.0, center.x + trans.x), superview.bounds.size.width - (CGFloat)28.0);
+    center.y = MIN(MAX((CGFloat)64.0, center.y + trans.y), superview.bounds.size.height - (CGFloat)64.0);
     self.floatingButton.center = center;
     [pan setTranslation:CGPointZero inView:superview];
 

@@ -554,9 +554,10 @@ static NSString *lc_normalizeNetwork(NSString *rawNet) {
             NSArray *udpMasks = [fm[@"udp"] isKindOfClass:[NSArray class]] ? fm[@"udp"] : nil;
             for (id m in udpMasks) {
                 if (![m isKindOfClass:[NSDictionary class]]) continue;
-                NSString *mType = lc_nonEmptyString(m[@"type"]).lowercaseString;
+                NSDictionary *maskDict = (NSDictionary *)m;
+                NSString *mType = lc_nonEmptyString(maskDict[@"type"]).lowercaseString;
                 if ([mType isEqualToString:@"salamander"]) {
-                    NSDictionary *ms = [m[@"settings"] isKindOfClass:[NSDictionary class]] ? m[@"settings"] : nil;
+                    NSDictionary *ms = [maskDict[@"settings"] isKindOfClass:[NSDictionary class]] ? maskDict[@"settings"] : nil;
                     node.hy2Obfs = @"salamander";
                     node.hy2ObfsPassword = lc_nonEmptyString(ms[@"password"]);
                     break;

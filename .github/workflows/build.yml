@@ -115,7 +115,8 @@ jobs:
             LINK_ARGS+=("$XRAY_BIN" "-Wl,-dead_strip")
           fi
 
-          # Compile fishhook.c (C99) + all Objective-C tweak sources (ARC)
+          # Compile fishhook.c (C99)
+          echo "Compiling tweak/fishhook.c..."
           clang -arch arm64 \
             -isysroot "$SDK_PATH" \
             -mios-version-min=15.0 \
@@ -135,13 +136,26 @@ jobs:
             tweak/TweakEntry.m
           )
 
+          OBJ_FILES=("build/fishhook.o")
+          for src in "${OBJC_SOURCES[@]}"; do
+            obj="build/$(basename "$src" .m).o"
+            echo "Compiling $src -> $obj..."
+            clang -arch arm64 \
+              -isysroot "$SDK_PATH" \
+              -mios-version-min=15.0 \
+              -O2 -fPIC -fobjc-arc -Wno-deprecated-declarations \
+              "${HEADER_ARGS[@]}" \
+              -c "$src" \
+              -o "$obj"
+            OBJ_FILES+=("$obj")
+          done
+
+          echo "Linking build/LCProxyTweak.dylib..."
           clang -arch arm64 \
             -isysroot "$SDK_PATH" \
             -mios-version-min=15.0 \
-            -dynamiclib -O2 -fobjc-arc -Wno-deprecated-declarations \
-            "${HEADER_ARGS[@]}" \
-            build/fishhook.o \
-            "${OBJC_SOURCES[@]}" \
+            -dynamiclib -O2 -fobjc-arc \
+            "${OBJ_FILES[@]}" \
             "${LINK_ARGS[@]}" \
             -framework Foundation \
             -framework CoreFoundation \

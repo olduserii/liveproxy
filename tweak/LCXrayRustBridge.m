@@ -5,6 +5,7 @@
 #import <unistd.h>
 #import <stdint.h>
 #import <stddef.h>
+#import <stdarg.h>
 
 #if __has_include("LCXrayRustCustomABI.h")
 #import "LCXrayRustCustomABI.h"

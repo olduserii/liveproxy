@@ -64,15 +64,21 @@ else
 fi
 
 # Inject LC_LOAD_DYLIB into main LiveContainer binary
-echo "[patch_ipa] Injecting @rpath/LCProxyTweak.dylib into main binary: $MAIN_BIN"
-"$INSERT_DYLIB" --strip-codesig --inplace --all-yes "@rpath/LCProxyTweak.dylib" "$MAIN_BIN"
+echo "[patch_ipa] Injecting @executable_path/Frameworks/LCProxyTweak.dylib into main binary: $MAIN_BIN"
+"$INSERT_DYLIB" --strip-codesig --inplace --all-yes "@executable_path/Frameworks/LCProxyTweak.dylib" "$MAIN_BIN"
 
 # Inject into TweakLoader.dylib (and any LiveContainer2 helper) so ALL guest apps load LCProxyTweak.dylib
 TWEAK_LOADERS="$(find "$APP_DIR" -name 'TweakLoader.dylib' -type f || true)"
 if [[ -n "$TWEAK_LOADERS" ]]; then
   while IFS= read -r loader; do
-    echo "[patch_ipa] Injecting @rpath/LCProxyTweak.dylib into guest loader: $loader"
-    "$INSERT_DYLIB" --strip-codesig --inplace --all-yes "@rpath/LCProxyTweak.dylib" "$loader"
+    LOADER_DIR="$(dirname "$loader")"
+    if [[ "$LOADER_DIR" == "$FRAMEWORKS_DIR" ]]; then
+      INJECT_PATH="@loader_path/LCProxyTweak.dylib"
+    else
+      INJECT_PATH="@rpath/LCProxyTweak.dylib"
+    fi
+    echo "[patch_ipa] Injecting $INJECT_PATH into guest loader: $loader"
+    "$INSERT_DYLIB" --strip-codesig --inplace --all-yes "$INJECT_PATH" "$loader"
     echo "[patch_ipa] otool -L $loader:"
     otool -L "$loader"
   done <<< "$TWEAK_LOADERS"
