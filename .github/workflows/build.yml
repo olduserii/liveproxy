@@ -1,0 +1,208 @@
+name: Build LiveContainer+SideStore+XrayRust IPA
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download latest XrayRust.xcframework from aimalygin/xray-rust-mobile
+        id: xray
+        run: |
+          set -euo pipefail
+          mkdir -p build/xray
+
+          RELEASE_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/aimalygin/xray-rust-mobile/releases/latest || \
+            curl -fsSL -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/aimalygin/xray-rust-mobile/releases | jq '.[0]')"
+
+          TAG_NAME="$(echo "$RELEASE_JSON" | jq -r '.tag_name // "latest"')"
+          ASSET_URL="$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("xcframework.*\\.zip$"; "i")) | .browser_download_url' | head -n 1)"
+
+          if [[ -z "$ASSET_URL" || "$ASSET_URL" == "null" ]]; then
+            echo "::error::Could not locate XrayRust.xcframework zip asset in aimalygin/xray-rust-mobile releases"
+            echo "$RELEASE_JSON" | jq -r '.assets[].name'
+            exit 1
+          fi
+
+          echo "Downloading XrayRust ($TAG_NAME): $ASSET_URL"
+          curl -fL "$ASSET_URL" -o build/xray/XrayRust.xcframework.zip
+          unzip -q build/xray/XrayRust.xcframework.zip -d build/xray/extracted
+
+          SLICE_DIR="$(find build/xray/extracted -type d -name 'ios-arm64' | head -n 1)"
+          if [[ -z "$SLICE_DIR" ]]; then
+            echo "::error::ios-arm64 slice not found inside XrayRust.xcframework"
+            find build/xray/extracted -maxdepth 4
+            exit 1
+          fi
+
+          echo "xray_tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "slice_dir=$SLICE_DIR" >> "$GITHUB_OUTPUT"
+
+          echo "=== Inspecting XrayRust ios-arm64 Headers ==="
+          find "$SLICE_DIR" -name '*.h' -print -exec cat {} \;
+
+          echo "=== Inspecting XrayRust ios-arm64 Exported Symbols (nm -gU) ==="
+          XRAY_BIN="$(find "$SLICE_DIR" -type f \( -name '*.a' -o -path '*.framework/*' ! -name '*.plist' ! -name '*.h' ! -name '*.modulemap' \) | head -n 1)"
+          if [[ -z "$XRAY_BIN" ]]; then
+            echo "::error::No binary/archive found inside $SLICE_DIR"
+            exit 1
+          fi
+          echo "Detected XrayRust binary: $XRAY_BIN"
+          file "$XRAY_BIN"
+          nm -gU "$XRAY_BIN" | grep -iE 'xray|rust|ffi|proxy|core|start|stop|free' | head -n 120 || nm -gU "$XRAY_BIN" | head -n 120
+
+          echo "xray_bin=$XRAY_BIN" >> "$GITHUB_OUTPUT"
+
+      - name: Build insert_dylib from source for macOS
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/tyilo/insert_dylib.git build/insert_dylib_src
+          clang -O2 -framework Foundation \
+            build/insert_dylib_src/insert_dylib/main.c \
+            -o build/insert_dylib
+          chmod +x build/insert_dylib
+
+      - name: Compile LCProxyTweak.dylib (arm64-apple-ios15.0)
+        run: |
+          set -euo pipefail
+          SDK_PATH="$(xcrun --sdk iphoneos --show-sdk-path)"
+          SLICE_DIR="${{ steps.xray.outputs.slice_dir }}"
+          XRAY_BIN="${{ steps.xray.outputs.xray_bin }}"
+
+          # Determine linking flags dynamically based on binary type (static .a vs dynamic .framework)
+          BIN_TYPE="$(file "$XRAY_BIN")"
+          LINK_ARGS=()
+          HEADER_ARGS=("-Itweak")
+
+          while IFS= read -r hdr_dir; do
+            HEADER_ARGS+=("-I$hdr_dir")
+          done < <(find "$SLICE_DIR" -type d -name 'Headers')
+
+          if echo "$BIN_TYPE" | grep -qi "dynamically linked shared library"; then
+            FW_DIR="$(dirname "$XRAY_BIN")"
+            FW_NAME="$(basename "$FW_DIR" .framework)"
+            echo "Linking XrayRust dynamically: -F $(dirname "$FW_DIR") -framework $FW_NAME"
+            LINK_ARGS+=("-F$(dirname "$FW_DIR")" "-framework" "$FW_NAME")
+          else
+            echo "Linking XrayRust statically with -force_load: $XRAY_BIN"
+            LINK_ARGS+=("-Wl,-force_load,$XRAY_BIN")
+          fi
+
+          # Compile fishhook.c (C99) + all Objective-C tweak sources (ARC)
+          clang -arch arm64 \
+            -isysroot "$SDK_PATH" \
+            -mios-version-min=15.0 \
+            -O2 -fPIC -c \
+            tweak/fishhook.c \
+            -o build/fishhook.o
+
+          OBJC_SOURCES=(
+            tweak/LCXrayRustBridge.m
+            tweak/LCProxyNode.m
+            tweak/LCConfigNormalizer.m
+            tweak/LCFastSelector.m
+            tweak/LCWatchdog.m
+            tweak/LCProxyManager.m
+            tweak/LCProxyHooks.m
+            tweak/LCProxyUI.m
+            tweak/TweakEntry.m
+          )
+
+          clang -arch arm64 \
+            -isysroot "$SDK_PATH" \
+            -mios-version-min=15.0 \
+            -dynamiclib -O2 -fobjc-arc \
+            "${HEADER_ARGS[@]}" \
+            build/fishhook.o \
+            "${OBJC_SOURCES[@]}" \
+            "${LINK_ARGS[@]}" \
+            -framework Foundation \
+            -framework UIKit \
+            -framework QuartzCore \
+            -framework CFNetwork \
+            -framework Network \
+            -framework Security \
+            -framework WebKit \
+            -lresolv -lc++ \
+            -install_name "@rpath/LCProxyTweak.dylib" \
+            -Wl,-rpath,@executable_path/Frameworks \
+            -Wl,-rpath,@loader_path/Frameworks \
+            -o build/LCProxyTweak.dylib
+
+          echo "=== LCProxyTweak.dylib verification ==="
+          file build/LCProxyTweak.dylib
+          otool -L build/LCProxyTweak.dylib
+
+      - name: Download latest LiveContainer+SideStore nightly IPA
+        id: lc
+        run: |
+          set -euo pipefail
+          mkdir -p build/lc
+
+          RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/LiveContainer/LiveContainer/releases?per_page=15")"
+
+          IPA_URL="$(echo "$RELEASES_JSON" | jq -r '
+            ([.[] | select(.tag_name | test("nightly"; "i"))] + .)
+            | map(.assets[]? | select(.name | test("LiveContainer\\+SideStore.*\\.ipa$"; "i")) | .browser_download_url)
+            | first // empty
+          ')"
+
+          LC_TAG="$(echo "$RELEASES_JSON" | jq -r '
+            ([.[] | select(.tag_name | test("nightly"; "i"))] + .)
+            | map(select(.assets[]?.name | test("LiveContainer\\+SideStore.*\\.ipa$"; "i")) | .tag_name)
+            | first // "nightly"
+          ')"
+
+          if [[ -z "$IPA_URL" ]]; then
+            echo "::error::Could not find LiveContainer+SideStore.ipa in LiveContainer/LiveContainer releases"
+            exit 1
+          fi
+
+          echo "Downloading LiveContainer+SideStore ($LC_TAG): $IPA_URL"
+          curl -fL "$IPA_URL" -o build/lc/LiveContainer+SideStore.ipa
+          echo "lc_tag=$LC_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Patch IPA with LCProxyTweak.dylib
+        run: |
+          set -euo pipefail
+          chmod +x scripts/patch_ipa.sh
+          ./scripts/patch_ipa.sh \
+            build/lc/LiveContainer+SideStore.ipa \
+            build/LCProxyTweak.dylib \
+            "${{ steps.xray.outputs.slice_dir }}" \
+            build/insert_dylib \
+            build/LiveContainer+SideStore+XrayRust.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveContainer+SideStore+XrayRust
+          path: build/LiveContainer+SideStore+XrayRust.ipa
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: LiveContainer+SideStore+XrayRust (#${{ github.run_number }})
+          body: |
+            Автоматическая сборка **LiveContainer+SideStore** с внедрённым нативным прокси-твиком на базе **xray-rust**.
+
+            - **XrayRust core release:** `${{ steps.xray.outputs.xray_tag }}`
+            - **LiveContainer base:** `${{ steps.lc.outputs.lc_tag }}`
+            - **Без VPN entitlements** — устанавливается через SideStore с бесплатным Apple ID.
+          files: build/LiveContainer+SideStore+XrayRust.ipa

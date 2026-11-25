@@ -1,0 +1,6 @@
+{
+  "name": "LCProxy XrayRust Builder",
+  "description": "Готовый к компиляции проект нативного iOS прокси-твика на базе xray-rust для LiveContainer+SideStore с GitHub Actions CI и выгрузкой в .zip.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
