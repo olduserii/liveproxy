@@ -159,6 +159,7 @@ jobs:
             "${LINK_ARGS[@]}" \
             -framework Foundation \
             -framework CoreFoundation \
+            -framework CoreGraphics \
             -framework UIKit \
             -framework QuartzCore \
             -framework CFNetwork \
@@ -166,7 +167,7 @@ jobs:
             -framework Network \
             -framework Security \
             -framework WebKit \
-            -lresolv -lz -liconv -lc++ \
+            -lobjc -lresolv -lz -liconv -lc++ \
             -install_name "@rpath/LCProxyTweak.dylib" \
             -Wl,-rpath,@executable_path/Frameworks \
             -Wl,-rpath,@loader_path/Frameworks \

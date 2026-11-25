@@ -2,6 +2,7 @@
 #import "LCProxyManager.h"
 #import "LCWatchdog.h"
 #import <QuartzCore/QuartzCore.h>
+#import <CoreGraphics/CoreGraphics.h>
 
 static NSString *const kFloatingBtnPosXKey = @"LCProxyFloatingBtnX";
 static NSString *const kFloatingBtnPosYKey = @"LCProxyFloatingBtnY";
