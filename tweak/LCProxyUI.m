@@ -1,6 +1,7 @@
 #import "LCProxyUI.h"
 #import "LCProxyManager.h"
 #import "LCWatchdog.h"
+#import <QuartzCore/QuartzCore.h>
 
 static NSString *const kFloatingBtnPosXKey = @"LCProxyFloatingBtnX";
 static NSString *const kFloatingBtnPosYKey = @"LCProxyFloatingBtnY";
@@ -425,9 +426,11 @@ static NSString *const kFloatingBtnHiddenKey = @"LCProxyFloatingBtnHidden";
         tf.placeholder = @"Название (опционально)";
     }];
     [ac addAction:[UIAlertAction actionWithTitle:@"Отмена" style:UIAlertActionStyleCancel handler:nil]];
+    __weak UIAlertController *weakAC = ac;
     [ac addAction:[UIAlertAction actionWithTitle:@"Загрузить" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        NSString *url = ac.textFields.firstObject.text;
-        NSString *name = ac.textFields.count > 1 ? ac.textFields[1].text : nil;
+        UIAlertController *strongAC = weakAC;
+        NSString *url = strongAC.textFields.firstObject.text;
+        NSString *name = strongAC.textFields.count > 1 ? strongAC.textFields[1].text : nil;
         [self showToast:@"Загрузка подписки..."];
         [[LCProxyManager sharedManager] addSubscriptionURL:url name:name completion:^(BOOL ok, NSString *msg) {
             [self showToast:msg ?: (ok ? @"Готово" : @"Ошибка")];
@@ -567,7 +570,7 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
 
 @interface LCProxyUI ()
 @property (nonatomic, strong) UIButton *floatingButton;
-@property (nonatomic, assign) BOOL gestureAttached;
+@property (nonatomic, weak) UIWindow *gestureWindow;
 @end
 
 @implementation LCProxyUI
@@ -600,14 +603,14 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
         UIWindow *win = [self activeKeyWindow];
         if (!win) return;
 
-        if (!self.gestureAttached) {
+        if (self.gestureWindow != win) {
             UITapGestureRecognizer *triple3 = [[UITapGestureRecognizer alloc] initWithTarget:self
                                                                                       action:@selector(toggleFloatingButtonVisibility)];
             triple3.numberOfTouchesRequired = 3;
             triple3.numberOfTapsRequired = 3;
             triple3.cancelsTouchesInView = NO;
             [win addGestureRecognizer:triple3];
-            self.gestureAttached = YES;
+            self.gestureWindow = win;
         }
 
         if (!self.floatingButton) {
@@ -697,8 +700,8 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
         while (topVC.presentedViewController) {
             topVC = topVC.presentedViewController;
         }
-        if (!topVC || [topVC isKindOfClass:[UINavigationController class]] &&
-            [((UINavigationController *)topVC).topViewController isKindOfClass:[LCProxyPanelViewController class]]) {
+        if (!topVC || ([topVC isKindOfClass:[UINavigationController class]] &&
+            [((UINavigationController *)topVC).topViewController isKindOfClass:[LCProxyPanelViewController class]])) {
             return;
         }
 

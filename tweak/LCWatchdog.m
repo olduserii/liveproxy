@@ -138,6 +138,7 @@ static const NSTimeInterval kReviveProbeTimeoutSec = 2.0;
             NSString *ifaceName = (iface == nw_interface_type_wifi) ? @"Wi-Fi"
                                 : (iface == nw_interface_type_cellular ? @"5G/LTE" : @"Network");
             [[LCProxyManager sharedManager] appendLog:[NSString stringWithFormat:@"[Watchdog] Network switched -> %@", ifaceName]];
+            [[LCXrayRustBridge sharedBridge] rebindActiveCarrierSockets];
             [strongSelf verifyAndReviveProxyWithReason:[NSString stringWithFormat:@"NetworkSwitch(%@)", ifaceName]];
         } else {
             [[LCProxyManager sharedManager] appendLog:@"[Watchdog] Network path unsatisfied (offline)"];

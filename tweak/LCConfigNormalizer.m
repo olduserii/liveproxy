@@ -542,10 +542,27 @@ static NSString *lc_normalizeNetwork(NSString *rawNet) {
     } else if (proto == LCProxyProtocolHysteria2) {
         node.host = lc_nonEmptyString(settings[@"address"]) ?: lc_nonEmptyString(settings[@"server"]);
         node.port = (uint16_t)[settings[@"port"] unsignedIntValue];
-        node.uuidOrPassword = lc_nonEmptyString(settings[@"password"]) ?: lc_nonEmptyString(settings[@"auth"]);
+        NSDictionary *hyStream = [stream[@"hysteriaSettings"] isKindOfClass:[NSDictionary class]] ? stream[@"hysteriaSettings"] : nil;
+        node.uuidOrPassword = lc_nonEmptyString(hyStream[@"auth"])
+                           ?: lc_nonEmptyString(settings[@"password"])
+                           ?: lc_nonEmptyString(settings[@"auth"]);
         NSDictionary *obfs = [settings[@"obfs"] isKindOfClass:[NSDictionary class]] ? settings[@"obfs"] : nil;
         node.hy2Obfs = lc_nonEmptyString(obfs[@"type"]);
         node.hy2ObfsPassword = lc_nonEmptyString(obfs[@"password"]);
+        if (node.hy2Obfs.length == 0) {
+            NSDictionary *fm = [stream[@"finalmask"] isKindOfClass:[NSDictionary class]] ? stream[@"finalmask"] : nil;
+            NSArray *udpMasks = [fm[@"udp"] isKindOfClass:[NSArray class]] ? fm[@"udp"] : nil;
+            for (id m in udpMasks) {
+                if (![m isKindOfClass:[NSDictionary class]]) continue;
+                NSString *mType = lc_nonEmptyString(m[@"type"]).lowercaseString;
+                if ([mType isEqualToString:@"salamander"]) {
+                    NSDictionary *ms = [m[@"settings"] isKindOfClass:[NSDictionary class]] ? m[@"settings"] : nil;
+                    node.hy2Obfs = @"salamander";
+                    node.hy2ObfsPassword = lc_nonEmptyString(ms[@"password"]);
+                    break;
+                }
+            }
+        }
     } else if (proto == LCProxyProtocolWireGuard) {
         node.wgPrivateKey = lc_nonEmptyString(settings[@"secretKey"]);
         if ([settings[@"address"] isKindOfClass:[NSArray class]]) node.wgAddresses = settings[@"address"];
@@ -907,29 +924,42 @@ static NSString *lc_normalizeNetwork(NSString *rawNet) {
             return ob;
         }
         case LCProxyProtocolHysteria2: {
-            ob[@"protocol"] = @"hysteria2";
-            NSMutableDictionary *settings = [NSMutableDictionary dictionary];
-            settings[@"address"] = node.host;
-            settings[@"port"] = @(node.port);
-            settings[@"password"] = node.uuidOrPassword ?: @"";
-            if (node.hy2Obfs.length > 0 && node.hy2ObfsPassword.length > 0) {
-                settings[@"obfs"] = @{
-                    @"type": node.hy2Obfs,
-                    @"password": node.hy2ObfsPassword
-                };
-            }
-            if (node.hy2UpMbps > 0) settings[@"upMbps"] = @(node.hy2UpMbps);
-            if (node.hy2DownMbps > 0) settings[@"downMbps"] = @(node.hy2DownMbps);
-            ob[@"settings"] = settings;
+            // Strict xray-rust / Xray-core v26 Hysteria 2 schema (reject_unknown_fields enforced)
+            ob[@"protocol"] = @"hysteria";
+            ob[@"settings"] = @{
+                @"version": @(2),
+                @"address": node.host,
+                @"port": @(node.port)
+            };
 
             NSMutableDictionary *tls = [NSMutableDictionary dictionary];
+            tls[@"alpn"] = @[@"h3"];
             if (node.sni.length > 0) tls[@"serverName"] = node.sni;
-            if (node.allowInsecure) tls[@"allowInsecure"] = @YES;
-            if (node.hy2PinSHA256.length > 0) tls[@"pinnedPeerCertificateChainSha256"] = @[node.hy2PinSHA256];
-            ob[@"streamSettings"] = @{
-                @"security": @"tls",
-                @"tlsSettings": tls
+            if (node.hy2PinSHA256.length > 0) tls[@"pinnedPeerCertSha256"] = node.hy2PinSHA256;
+
+            NSMutableDictionary *stream = [NSMutableDictionary dictionary];
+            stream[@"network"] = @"hysteria";
+            stream[@"security"] = @"tls";
+            stream[@"tlsSettings"] = tls;
+            stream[@"hysteriaSettings"] = @{
+                @"version": @(2),
+                @"auth": node.uuidOrPassword ?: @""
             };
+
+            if ([node.hy2Obfs.lowercaseString isEqualToString:@"salamander"] && node.hy2ObfsPassword.length >= 4) {
+                stream[@"finalmask"] = @{
+                    @"udp": @[
+                        @{
+                            @"type": @"salamander",
+                            @"settings": @{
+                                @"password": node.hy2ObfsPassword
+                            }
+                        }
+                    ]
+                };
+            }
+
+            ob[@"streamSettings"] = stream;
             return ob;
         }
         case LCProxyProtocolWireGuard: {
@@ -992,7 +1022,7 @@ static NSString *lc_normalizeNetwork(NSString *rawNet) {
         if (node.sni.length > 0) t[@"serverName"] = node.sni;
         if (node.fingerprint.length > 0) t[@"fingerprint"] = node.fingerprint;
         if (node.alpn.count > 0) t[@"alpn"] = node.alpn;
-        if (node.allowInsecure) t[@"allowInsecure"] = @YES;
+        // Note: xray-rust explicitly rejects allowInsecure=true; omit it from strict config.
         stream[@"tlsSettings"] = t;
     }
 

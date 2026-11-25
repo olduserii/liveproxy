@@ -11,8 +11,8 @@ typedef void (^LCXrayLogHandler)(NSString *message);
 @property (nonatomic, copy, readonly) NSString *instanceTag;
 @end
 
-/// Strictly isolated Objective-C <-> Rust C-ABI adapter for aimalygin/xray-rust-mobile.
-/// All direct calls to XrayRust.xcframework symbols are confined exclusively to this class.
+/// Strictly isolated Objective-C <-> Rust C-ABI adapter for aimalygin/xray-rust-mobile (xray_ffi.h).
+/// All direct calls to XrayRust.xcframework C ABI functions are confined exclusively to this class.
 @interface LCXrayRustBridge : NSObject
 
 + (instancetype)sharedBridge;
@@ -27,7 +27,7 @@ typedef void (^LCXrayLogHandler)(NSString *message);
 @property (nonatomic, assign, readonly) uint16_t activeSocksPort;
 @property (nonatomic, assign, readonly) uint16_t activeHttpPort;
 
-/// Human-readable description of detected C ABI symbols and core version.
+/// Human-readable description of detected C ABI version and capabilities.
 - (NSString *)coreVersionString;
 
 /// Allocates an unused ephemeral TCP port on 127.0.0.1.
@@ -42,9 +42,11 @@ typedef void (^LCXrayLogHandler)(NSString *message);
 /// Stops the primary xray-rust instance cleanly and releases bound ports.
 - (void)stopPrimaryInstance;
 
+/// Notifies active Hysteria 2 / WireGuard / QUIC carriers to rebind fresh sockets on Wi-Fi <-> 5G switch.
+- (void)rebindActiveCarrierSockets;
+
 /// Starts an isolated lightweight probe instance for Stage-2 real latency testing.
-/// If the linked ABI only exposes singleton start/stop symbols, probes run safely
-/// without corrupting the primary instance state.
+/// xray-rust-mobile uses handle-based XrayCoreHandle instances, supporting concurrent probes natively.
 - (nullable LCXrayProbeHandle *)startProbeWithJSONConfig:(NSString *)jsonConfig
                                                socksPort:(uint16_t)socksPort
                                                 httpPort:(uint16_t)httpPort
@@ -53,7 +55,7 @@ typedef void (^LCXrayLogHandler)(NSString *message);
 /// Stops and releases a probe instance started via startProbeWithJSONConfig:.
 - (void)stopProbeHandle:(LCXrayProbeHandle *)handle;
 
-/// Returns YES if the detected XrayRust C ABI supports concurrent multi-instance handles.
+/// Returns YES because XrayCoreHandle supports concurrent multi-instance probes natively.
 - (BOOL)supportsConcurrentProbes;
 
 @end

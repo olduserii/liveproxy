@@ -193,7 +193,6 @@ export function buildStrictXrayJSON(node: ParsedNode, socksPort = 10808, httpPor
       if (node.sni) t.serverName = node.sni;
       if (node.fingerprint) t.fingerprint = node.fingerprint;
       if (node.alpn?.length) t.alpn = node.alpn;
-      if (node.allowInsecure) t.allowInsecure = true;
       stream.tlsSettings = t;
     }
     if (node.network === 'xhttp') {
@@ -268,22 +267,31 @@ export function buildStrictXrayJSON(node: ParsedNode, socksPort = 10808, httpPor
       },
     };
   } else if (node.protocol === 'hysteria2') {
-    const settings: Record<string, unknown> = {
-      address: node.host,
-      port: node.port,
-      password: node.uuidOrPassword || '',
-    };
-    if (node.hy2Obfs && node.hy2ObfsPassword) {
-      settings.obfs = { type: node.hy2Obfs, password: node.hy2ObfsPassword };
-    }
-    const tls: Record<string, unknown> = {};
+    const tls: Record<string, unknown> = { alpn: ['h3'] };
     if (node.sni) tls.serverName = node.sni;
-    if (node.allowInsecure) tls.allowInsecure = true;
+    const stream: Record<string, unknown> = {
+      network: 'hysteria',
+      security: 'tls',
+      tlsSettings: tls,
+      hysteriaSettings: {
+        version: 2,
+        auth: node.uuidOrPassword || '',
+      },
+    };
+    if (node.hy2Obfs?.toLowerCase() === 'salamander' && node.hy2ObfsPassword && node.hy2ObfsPassword.length >= 4) {
+      stream.finalmask = {
+        udp: [{ type: 'salamander', settings: { password: node.hy2ObfsPassword } }],
+      };
+    }
     outbound = {
       tag: 'proxy',
-      protocol: 'hysteria2',
-      settings,
-      streamSettings: { security: 'tls', tlsSettings: tls },
+      protocol: 'hysteria',
+      settings: {
+        version: 2,
+        address: node.host,
+        port: node.port,
+      },
+      streamSettings: stream,
     };
   } else if (node.protocol === 'wireguard') {
     outbound = {
@@ -478,10 +486,10 @@ function parseJSONPayload(raw: string): { nodes: ParsedNode[]; stripped: string[
           port = Number(srv?.port) || 0;
           uuidOrPassword = srv?.password || '';
           method = srv?.method;
-        } else if (proto === 'hysteria2') {
+        } else if (proto === 'hysteria' || proto === 'hysteria2') {
           host = st.address || st.server || '';
           port = Number(st.port) || 0;
-          uuidOrPassword = st.password || st.auth || '';
+          uuidOrPassword = ss.hysteriaSettings?.auth || st.password || st.auth || '';
         }
 
         if (!host || !port) continue;
@@ -490,7 +498,7 @@ function parseJSONPayload(raw: string): { nodes: ParsedNode[]; stripped: string[
         const xhttp = ss.xhttpSettings || ss.splithttpSettings;
         nodes.push({
           name: obj.remarks || ob.tag || `${proto.toUpperCase()} ${host}:${port}`,
-          protocol: proto as ParsedNode['protocol'],
+          protocol: (proto === 'hysteria' ? 'hysteria2' : proto) as ParsedNode['protocol'],
           host,
           port,
           uuidOrPassword,

@@ -37,9 +37,9 @@ static NSDictionary *lc_buildProxyDictionary(void) {
     if (httpPort == 0) return @{};
 
     NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-    dict[(NSString *)kCFNetworkProxiesHTTPEnable]  = @YES;
-    dict[(NSString *)kCFNetworkProxiesHTTPProxy]   = @"127.0.0.1";
-    dict[(NSString *)kCFNetworkProxiesHTTPPort]    = @(httpPort);
+    dict[@"HTTPEnable"]  = @YES;
+    dict[@"HTTPProxy"]   = @"127.0.0.1";
+    dict[@"HTTPPort"]    = @(httpPort);
 
     dict[@"HTTPSEnable"] = @YES;
     dict[@"HTTPSProxy"]  = @"127.0.0.1";
@@ -51,8 +51,8 @@ static NSDictionary *lc_buildProxyDictionary(void) {
         dict[@"SOCKSPort"]   = @(socksPort);
     }
 
-    // Strict loopback exclusion to prevent proxy self-loops
-    dict[(NSString *)kCFNetworkProxiesExceptionsList] = @[
+    // Strict loopback exclusion to prevent proxy self-loops (string key avoids macOS-only kCFNetworkProxiesExceptionsList)
+    dict[@"ExceptionsList"] = @[
         @"127.0.0.1",
         @"localhost",
         @"::1",
@@ -135,6 +135,7 @@ NSURLSessionConfiguration *LCProxyCreateDirectSessionConfiguration(void) {
 static NSURLSessionConfiguration *(*orig_defaultSessionConfiguration)(id, SEL) = NULL;
 static NSURLSessionConfiguration *(*orig_ephemeralSessionConfiguration)(id, SEL) = NULL;
 static NSDictionary *(*orig_connectionProxyDictionary)(id, SEL) = NULL;
+static NSDictionary *(*orig_nscf_connectionProxyDictionary)(id, SEL) = NULL;
 
 static NSURLSessionConfiguration *lc_defaultSessionConfiguration(id self, SEL _cmd) {
     NSURLSessionConfiguration *cfg = orig_defaultSessionConfiguration(self, _cmd);
@@ -159,7 +160,17 @@ static NSDictionary *lc_connectionProxyDictionary(id self, SEL _cmd) {
     if (lc_shouldApplyProxy()) {
         return lc_buildProxyDictionary();
     }
-    return orig_connectionProxyDictionary(self, _cmd);
+    return orig_connectionProxyDictionary ? orig_connectionProxyDictionary(self, _cmd) : nil;
+}
+
+static NSDictionary *lc_nscf_connectionProxyDictionary(id self, SEL _cmd) {
+    if (objc_getAssociatedObject(self, kLCDirectBypassAssocKey)) {
+        return @{};
+    }
+    if (lc_shouldApplyProxy()) {
+        return lc_buildProxyDictionary();
+    }
+    return orig_nscf_connectionProxyDictionary ? orig_nscf_connectionProxyDictionary(self, _cmd) : nil;
 }
 
 #pragma mark - 2. CFNetworkCopySystemProxySettings via fishhook
@@ -218,14 +229,14 @@ void LCProxyHooksInstall(void) {
         lc_swizzleInstanceMethod(cfgCls, @selector(connectionProxyDictionary),
                                  (IMP)lc_connectionProxyDictionary, (IMP *)&orig_connectionProxyDictionary);
 
-        // Also swizzle internal __NSCFURLSessionConfiguration if Apple uses a private subclass
+        // Also swizzle internal __NSCFURLSessionConfiguration with its own preserved original IMP
         Class internalCfgCls = NSClassFromString(@"__NSCFURLSessionConfiguration");
         if (internalCfgCls && internalCfgCls != cfgCls) {
-            IMP dummy = NULL;
             Method m = class_getInstanceMethod(internalCfgCls, @selector(connectionProxyDictionary));
-            if (m && method_getImplementation(m) != (IMP)lc_connectionProxyDictionary) {
-                dummy = method_setImplementation(m, (IMP)lc_connectionProxyDictionary);
-                if (!orig_connectionProxyDictionary) orig_connectionProxyDictionary = (NSDictionary *(*)(id, SEL))dummy;
+            if (m && method_getImplementation(m) != (IMP)lc_connectionProxyDictionary &&
+                method_getImplementation(m) != (IMP)lc_nscf_connectionProxyDictionary) {
+                orig_nscf_connectionProxyDictionary = (NSDictionary *(*)(id, SEL))method_setImplementation(
+                    m, (IMP)lc_nscf_connectionProxyDictionary);
             }
         }
 

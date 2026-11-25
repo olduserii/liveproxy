@@ -63,7 +63,15 @@ jobs:
           echo "Detected XrayRust binary: $XRAY_BIN"
           file "$XRAY_BIN"
           nm -gU "$XRAY_BIN" > build/xray/symbols.txt
-          grep -E ' [Tt] _[a-zA-Z]' build/xray/symbols.txt | grep -v ' __ZN' | awk 'NR<=120{print}' || true
+          grep -E ' [Tt] _xray_' build/xray/symbols.txt | awk 'NR<=120{print}' || true
+
+          for sym in _xray_core_new _xray_core_load_config_json _xray_core_start _xray_core_stop _xray_core_free _xray_error_message _xray_error_free; do
+            if ! grep -Eq "(^|[[:space:]])${sym}([[:space:]]|$)" build/xray/symbols.txt; then
+              echo "::error::Required C ABI symbol $sym not found in $XRAY_BIN"
+              exit 1
+            fi
+          done
+          echo "Verified all required xray-rust-mobile C ABI symbols."
 
           echo "xray_bin=$XRAY_BIN" >> "$GITHUB_OUTPUT"
 
@@ -71,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/tyilo/insert_dylib.git build/insert_dylib_src
-          clang -O2 -framework Foundation \
+          clang -O2 -Wno-deprecated-declarations -framework Foundation \
             build/insert_dylib_src/insert_dylib/main.c \
             -o build/insert_dylib
           chmod +x build/insert_dylib
@@ -98,8 +106,8 @@ jobs:
             echo "Linking XrayRust dynamically: -F $(dirname "$FW_DIR") -framework $FW_NAME"
             LINK_ARGS+=("-F$(dirname "$FW_DIR")" "-framework" "$FW_NAME")
           else
-            echo "Linking XrayRust statically with -force_load: $XRAY_BIN"
-            LINK_ARGS+=("-Wl,-force_load,$XRAY_BIN")
+            echo "Linking XrayRust static archive: $XRAY_BIN"
+            LINK_ARGS+=("$XRAY_BIN" "-Wl,-dead_strip")
           fi
 
           # Compile fishhook.c (C99) + all Objective-C tweak sources (ARC)
@@ -125,19 +133,21 @@ jobs:
           clang -arch arm64 \
             -isysroot "$SDK_PATH" \
             -mios-version-min=15.0 \
-            -dynamiclib -O2 -fobjc-arc \
+            -dynamiclib -O2 -fobjc-arc -Wno-deprecated-declarations \
             "${HEADER_ARGS[@]}" \
             build/fishhook.o \
             "${OBJC_SOURCES[@]}" \
             "${LINK_ARGS[@]}" \
             -framework Foundation \
+            -framework CoreFoundation \
             -framework UIKit \
             -framework QuartzCore \
             -framework CFNetwork \
+            -framework SystemConfiguration \
             -framework Network \
             -framework Security \
             -framework WebKit \
-            -lresolv -lc++ \
+            -lresolv -lz -liconv -lc++ \
             -install_name "@rpath/LCProxyTweak.dylib" \
             -Wl,-rpath,@executable_path/Frameworks \
             -Wl,-rpath,@loader_path/Frameworks \

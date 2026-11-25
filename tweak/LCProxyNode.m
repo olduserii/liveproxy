@@ -60,7 +60,7 @@ static NSString *lc_formatHost(NSString *host) {
 + (LCProxyProtocol)protocolTypeFromString:(NSString *)str {
     NSString *lower = [[str stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
     if ([lower isEqualToString:@"vless"]) return LCProxyProtocolVLESS;
-    if ([lower isEqualToString:@"hysteria2"] || [lower isEqualToString:@"hy2"]) return LCProxyProtocolHysteria2;
+    if ([lower isEqualToString:@"hysteria"] || [lower isEqualToString:@"hysteria2"] || [lower isEqualToString:@"hy2"]) return LCProxyProtocolHysteria2;
     if ([lower isEqualToString:@"trojan"]) return LCProxyProtocolTrojan;
     if ([lower isEqualToString:@"vmess"]) return LCProxyProtocolVMess;
     if ([lower isEqualToString:@"shadowsocks"] || [lower isEqualToString:@"ss"]) return LCProxyProtocolShadowsocks;
