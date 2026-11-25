@@ -19,14 +19,19 @@ jobs:
 
       - name: Download latest XrayRust.xcframework from aimalygin/xray-rust-mobile
         id: xray
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p build/xray
 
-          RELEASE_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/aimalygin/xray-rust-mobile/releases/latest || \
-            curl -fsSL -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/aimalygin/xray-rust-mobile/releases | jq '.[0]')"
+          CURL_API=(curl -fsSL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors
+            -H "Accept: application/vnd.github+json"
+            -H "Authorization: Bearer ${GITHUB_TOKEN}"
+            -H "User-Agent: LCProxy-Builder")
+
+          RELEASE_JSON="$("${CURL_API[@]}" https://api.github.com/repos/aimalygin/xray-rust-mobile/releases/latest || \
+            "${CURL_API[@]}" https://api.github.com/repos/aimalygin/xray-rust-mobile/releases | jq '.[0]')"
 
           TAG_NAME="$(echo "$RELEASE_JSON" | jq -r '.tag_name // "latest"')"
           ASSET_URL="$(echo "$RELEASE_JSON" | jq -r '[.assets[] | select(.name | test("xcframework.*\\.zip$"; "i")) | .browser_download_url] | first // empty')"
@@ -38,7 +43,7 @@ jobs:
           fi
 
           echo "Downloading XrayRust ($TAG_NAME): $ASSET_URL"
-          curl -fL "$ASSET_URL" -o build/xray/XrayRust.xcframework.zip
+          curl -fL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors "$ASSET_URL" -o build/xray/XrayRust.xcframework.zip
           unzip -q build/xray/XrayRust.xcframework.zip -d build/xray/extracted
 
           SLICE_DIR="$(find build/xray/extracted -type d -name 'ios-arm64' | awk 'NR==1{print}')"
@@ -159,12 +164,17 @@ jobs:
 
       - name: Download latest LiveContainer+SideStore nightly IPA
         id: lc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p build/lc
 
-          RELEASES_JSON="$(curl -fsSL -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/LiveContainer/LiveContainer/releases?per_page=15")"
+          RELEASES_JSON="$(curl -fsSL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "User-Agent: LCProxy-Builder" \
+            "https://api.github.com/repos/LiveContainer/LiveContainer/releases?per_page=15" || echo "[]")"
 
           IPA_URL="$(echo "$RELEASES_JSON" | jq -r '
             ([.[] | select(.tag_name | test("nightly"; "i"))] + .)
@@ -179,12 +189,12 @@ jobs:
           ')"
 
           if [[ -z "$IPA_URL" ]]; then
-            echo "::error::Could not find LiveContainer+SideStore.ipa in LiveContainer/LiveContainer releases"
-            exit 1
+            IPA_URL="https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer%2BSideStore.ipa"
+            LC_TAG="nightly"
           fi
 
           echo "Downloading LiveContainer+SideStore ($LC_TAG): $IPA_URL"
-          curl -fL "$IPA_URL" -o build/lc/LiveContainer+SideStore.ipa
+          curl -fL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors "$IPA_URL" -o build/lc/LiveContainer+SideStore.ipa
           echo "lc_tag=$LC_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Patch IPA with LCProxyTweak.dylib
