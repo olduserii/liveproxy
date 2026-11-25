@@ -21,7 +21,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 echo "[patch_ipa] Extracting $INPUT_IPA..."
 unzip -q "$INPUT_IPA" -d "$WORK_DIR"
 
-APP_DIR="$(find "$WORK_DIR/Payload" -maxdepth 1 -name '*.app' -type d | head -n 1)"
+APP_DIR="$(find "$WORK_DIR/Payload" -maxdepth 1 -name '*.app' -type d | awk 'NR==1{print}')"
 if [[ -z "$APP_DIR" ]]; then
   echo "[patch_ipa] ERROR: No .app bundle found inside Payload/" >&2
   exit 1
@@ -42,7 +42,7 @@ cp -f "$TWEAK_DYLIB" "$FRAMEWORKS_DIR/LCProxyTweak.dylib"
 chmod 755 "$FRAMEWORKS_DIR/LCProxyTweak.dylib"
 
 # Auto-detect whether XrayRust slice is a dynamic framework or static archive
-XRAY_FRAMEWORK_DIR="$(find "$XRAY_SLICE_DIR" -maxdepth 2 -name '*.framework' -type d | head -n 1 || true)"
+XRAY_FRAMEWORK_DIR="$(find "$XRAY_SLICE_DIR" -maxdepth 2 -name '*.framework' -type d | awk 'NR==1{print}' || true)"
 if [[ -n "$XRAY_FRAMEWORK_DIR" ]]; then
   FW_NAME="$(basename "$XRAY_FRAMEWORK_DIR" .framework)"
   FW_BIN="$XRAY_FRAMEWORK_DIR/$FW_NAME"

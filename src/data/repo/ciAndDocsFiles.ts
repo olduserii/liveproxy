@@ -30,7 +30,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 echo "[patch_ipa] Extracting $INPUT_IPA..."
 unzip -q "$INPUT_IPA" -d "$WORK_DIR"
 
-APP_DIR="$(find "$WORK_DIR/Payload" -maxdepth 1 -name '*.app' -type d | head -n 1)"
+APP_DIR="$(find "$WORK_DIR/Payload" -maxdepth 1 -name '*.app' -type d | awk 'NR==1{print}')"
 if [[ -z "$APP_DIR" ]]; then
   echo "[patch_ipa] ERROR: No .app bundle found inside Payload/" >&2
   exit 1
@@ -51,7 +51,7 @@ cp -f "$TWEAK_DYLIB" "$FRAMEWORKS_DIR/LCProxyTweak.dylib"
 chmod 755 "$FRAMEWORKS_DIR/LCProxyTweak.dylib"
 
 # Auto-detect whether XrayRust slice is a dynamic framework or static archive
-XRAY_FRAMEWORK_DIR="$(find "$XRAY_SLICE_DIR" -maxdepth 2 -name '*.framework' -type d | head -n 1 || true)"
+XRAY_FRAMEWORK_DIR="$(find "$XRAY_SLICE_DIR" -maxdepth 2 -name '*.framework' -type d | awk 'NR==1{print}' || true)"
 if [[ -n "$XRAY_FRAMEWORK_DIR" ]]; then
   FW_NAME="$(basename "$XRAY_FRAMEWORK_DIR" .framework)"
   FW_BIN="$XRAY_FRAMEWORK_DIR/$FW_NAME"
@@ -150,7 +150,7 @@ jobs:
             https://api.github.com/repos/aimalygin/xray-rust-mobile/releases | jq '.[0]')"
 
           TAG_NAME="$(echo "$RELEASE_JSON" | jq -r '.tag_name // "latest"')"
-          ASSET_URL="$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("xcframework.*\\\\.zip$"; "i")) | .browser_download_url' | head -n 1)"
+          ASSET_URL="$(echo "$RELEASE_JSON" | jq -r '[.assets[] | select(.name | test("xcframework.*\\\\.zip$"; "i")) | .browser_download_url] | first // empty')"
 
           if [[ -z "$ASSET_URL" || "$ASSET_URL" == "null" ]]; then
             echo "::error::Could not locate XrayRust.xcframework zip asset in aimalygin/xray-rust-mobile releases"
@@ -162,7 +162,7 @@ jobs:
           curl -fL "$ASSET_URL" -o build/xray/XrayRust.xcframework.zip
           unzip -q build/xray/XrayRust.xcframework.zip -d build/xray/extracted
 
-          SLICE_DIR="$(find build/xray/extracted -type d -name 'ios-arm64' | head -n 1)"
+          SLICE_DIR="$(find build/xray/extracted -type d -name 'ios-arm64' | awk 'NR==1{print}')"
           if [[ -z "$SLICE_DIR" ]]; then
             echo "::error::ios-arm64 slice not found inside XrayRust.xcframework"
             find build/xray/extracted -maxdepth 4
@@ -175,15 +175,16 @@ jobs:
           echo "=== Inspecting XrayRust ios-arm64 Headers ==="
           find "$SLICE_DIR" -name '*.h' -print -exec cat {} \\;
 
-          echo "=== Inspecting XrayRust ios-arm64 Exported Symbols (nm -gU) ==="
-          XRAY_BIN="$(find "$SLICE_DIR" -type f \\( -name '*.a' -o -path '*.framework/*' ! -name '*.plist' ! -name '*.h' ! -name '*.modulemap' \\) | head -n 1)"
+          echo "=== Inspecting XrayRust ios-arm64 Exported C ABI Symbols (nm -gU) ==="
+          XRAY_BIN="$(find "$SLICE_DIR" -type f \\( -name '*.a' -o -path '*.framework/*' ! -name '*.plist' ! -name '*.h' ! -name '*.modulemap' \\) | awk 'NR==1{print}')"
           if [[ -z "$XRAY_BIN" ]]; then
             echo "::error::No binary/archive found inside $SLICE_DIR"
             exit 1
           fi
           echo "Detected XrayRust binary: $XRAY_BIN"
           file "$XRAY_BIN"
-          nm -gU "$XRAY_BIN" | grep -iE 'xray|rust|ffi|proxy|core|start|stop|free' | head -n 120 || nm -gU "$XRAY_BIN" | head -n 120
+          nm -gU "$XRAY_BIN" > build/xray/symbols.txt
+          grep -E ' [Tt] _[a-zA-Z]' build/xray/symbols.txt | grep -v ' __ZN' | awk 'NR<=120{print}' || true
 
           echo "xray_bin=$XRAY_BIN" >> "$GITHUB_OUTPUT"
 
