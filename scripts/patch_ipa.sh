@@ -38,7 +38,7 @@ if [[ ! -f "$MAIN_BIN" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Clone Bundle Identifier, Display Name, URL Schemes & PlugIns (.appex)
+# Clone Bundle Identifier, Display Name & PlugIns (.appex)
 # so this build installs cleanly alongside stock LiveContainer without conflicts
 # ---------------------------------------------------------------------------
 ORIG_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")"
@@ -60,27 +60,13 @@ if [[ -n "$CLONE_SUFFIX" ]]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $CLONE_DISPLAY_NAME" "$lproj_plist" 2>/dev/null || true
   done < <(find "$APP_DIR" -maxdepth 2 -path '*.lproj/InfoPlist.strings' -type f)
 
-  # Update CFBundleURLTypes schemes to avoid colliding with stock LiveContainer
-  python3 - "$INFO_PLIST" "$ORIG_BUNDLE_ID" "$NEW_BUNDLE_ID" "$CLEAN_SUFFIX" << 'PYEOF'
-import plistlib, sys
-plist_path, orig_id, new_id, suffix = sys.argv[1:5]
-with open(plist_path, "rb") as f:
-    pl = plistlib.load(f)
-url_types = pl.get("CFBundleURLTypes")
-if isinstance(url_types, list):
-    for item in url_types:
-        if isinstance(item, dict):
-            if isinstance(item.get("CFBundleURLName"), str) and item["CFBundleURLName"].startswith(orig_id):
-                item["CFBundleURLName"] = new_id + item["CFBundleURLName"][len(orig_id):]
-            schemes = item.get("CFBundleURLSchemes")
-            if isinstance(schemes, list):
-                item["CFBundleURLSchemes"] = [
-                    f"{s}-{suffix}" if isinstance(s, str) and not s.endswith(f"-{suffix}") else s
-                    for s in schemes
-                ]
-with open(plist_path, "wb") as f:
-    plistlib.dump(pl, f, fmt=plistlib.FMT_BINARY)
-PYEOF
+  # IMPORTANT: Do NOT rename CFBundleURLSchemes[0] ("livecontainer")!
+  # LiveContainer checks `LCUtils.appUrlScheme()?.lowercased() != "livecontainer"`
+  # (LiveContainerSwiftUI/Utilities/Shared.swift) and switches to secondary
+  # LiveContainer2 mode (`multiLCStatus = 2`) if changed, which hides the '+'
+  # install button, Sources/Tweaks tabs, and Certificate Import in Settings.
+  # iOS allows multiple apps with distinct CFBundleIdentifiers to share a URL scheme.
+  echo "[patch_ipa] Preserving CFBundleURLSchemes ('livecontainer') to keep full primary LiveContainer mode"
 
   # Update all embedded PlugIns/*.appex Bundle IDs to inherit the new parent prefix
   if [[ -d "$APP_DIR/PlugIns" ]]; then
