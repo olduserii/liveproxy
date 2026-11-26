@@ -567,11 +567,12 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
 
 @end
 
-#pragma mark - Floating Draggable Button & 3-Finger Triple-Tap Controller
+#pragma mark - 2-Finger Triple-Tap Menu & Optional Floating Button Controller
 
-@interface LCProxyUI ()
+@interface LCProxyUI () <UIGestureRecognizerDelegate>
 @property (nonatomic, strong) UIButton *floatingButton;
 @property (nonatomic, weak) UIWindow *gestureWindow;
+@property (nonatomic, strong) UITapGestureRecognizer *menuTapGesture;
 @end
 
 @implementation LCProxyUI
@@ -599,18 +600,30 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
     return nil;
 }
 
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    return YES;
+}
+
 - (void)installOverlayIfNeeded {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *win = [self activeKeyWindow];
         if (!win) return;
 
         if (self.gestureWindow != win) {
-            UITapGestureRecognizer *triple3 = [[UITapGestureRecognizer alloc] initWithTarget:self
-                                                                                      action:@selector(toggleFloatingButtonVisibility)];
-            triple3.numberOfTouchesRequired = 3;
-            triple3.numberOfTapsRequired = 3;
-            triple3.cancelsTouchesInView = NO;
-            [win addGestureRecognizer:triple3];
+            if (self.menuTapGesture && self.menuTapGesture.view) {
+                [self.menuTapGesture.view removeGestureRecognizer:self.menuTapGesture];
+            }
+            UITapGestureRecognizer *twoFingerTriple = [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                                              action:@selector(toggleControlPanel)];
+            twoFingerTriple.numberOfTouchesRequired = 2;
+            twoFingerTriple.numberOfTapsRequired = 3;
+            twoFingerTriple.cancelsTouchesInView = NO;
+            twoFingerTriple.delaysTouchesBegan = NO;
+            twoFingerTriple.delaysTouchesEnded = NO;
+            twoFingerTriple.delegate = self;
+            [win addGestureRecognizer:twoFingerTriple];
+            self.menuTapGesture = twoFingerTriple;
             self.gestureWindow = win;
         }
 
@@ -636,7 +649,8 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
                 btn.center = CGPointMake(MIN(MAX((CGFloat)28.0, x), win.bounds.size.width - (CGFloat)28.0),
                                          MIN(MAX((CGFloat)64.0, y), win.bounds.size.height - (CGFloat)64.0));
             }
-            btn.hidden = [ud boolForKey:kFloatingBtnHiddenKey];
+            // Hidden by default: menu is opened via 2-finger triple-tap without cluttering the screen
+            btn.hidden = [ud objectForKey:kFloatingBtnHiddenKey] ? [ud boolForKey:kFloatingBtnHiddenKey] : YES;
 
             [btn addTarget:self action:@selector(presentControlPanel) forControlEvents:UIControlEventTouchUpInside];
             UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleButtonPan:)];
@@ -691,6 +705,22 @@ trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
         [self installOverlayIfNeeded];
         self.floatingButton.hidden = !self.floatingButton.hidden;
         [[NSUserDefaults standardUserDefaults] setBool:self.floatingButton.hidden forKey:kFloatingBtnHiddenKey];
+    });
+}
+
+- (void)toggleControlPanel {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *win = [self activeKeyWindow];
+        UIViewController *topVC = win.rootViewController;
+        while (topVC.presentedViewController) {
+            topVC = topVC.presentedViewController;
+        }
+        if ([topVC isKindOfClass:[UINavigationController class]] &&
+            [((UINavigationController *)topVC).topViewController isKindOfClass:[LCProxyPanelViewController class]]) {
+            [topVC dismissViewControllerAnimated:YES completion:nil];
+            return;
+        }
+        [self presentControlPanel];
     });
 }
 

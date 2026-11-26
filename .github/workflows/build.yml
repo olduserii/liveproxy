@@ -1,10 +1,19 @@
-name: Build LiveContainer+SideStore+XrayRust IPA
+name: Build LiveContainer Clone + XrayRust IPA
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      bundle_id_suffix:
+        description: 'Суффикс клона Bundle ID (например: xray -> com.kdt.livecontainer.xray)'
+        required: false
+        default: 'xray'
+      app_display_name:
+        description: 'Отображаемое имя приложения на рабочем столе iPhone'
+        required: false
+        default: 'LiveContainer Xray'
 
 permissions:
   contents: write
@@ -177,7 +186,7 @@ jobs:
           file build/LCProxyTweak.dylib
           otool -L build/LCProxyTweak.dylib
 
-      - name: Download latest LiveContainer+SideStore nightly IPA
+      - name: Download latest standalone LiveContainer nightly IPA (no SideStore)
         id: lc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -193,52 +202,58 @@ jobs:
 
           IPA_URL="$(echo "$RELEASES_JSON" | jq -r '
             ([.[] | select(.tag_name | test("nightly"; "i"))] + .)
-            | map(.assets[]? | select(.name | test("LiveContainer\\+SideStore.*\\.ipa$"; "i")) | .browser_download_url)
+            | map(.assets[]? | select(.name | test("^LiveContainer\\.ipa$"; "i")) | .browser_download_url)
             | first // empty
           ')"
 
           LC_TAG="$(echo "$RELEASES_JSON" | jq -r '
             ([.[] | select(.tag_name | test("nightly"; "i"))] + .)
-            | map(select(.assets[]?.name | test("LiveContainer\\+SideStore.*\\.ipa$"; "i")) | .tag_name)
+            | map(select(.assets[]?.name | test("^LiveContainer\\.ipa$"; "i")) | .tag_name)
             | first // "nightly"
           ')"
 
           if [[ -z "$IPA_URL" ]]; then
-            IPA_URL="https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer%2BSideStore.ipa"
+            IPA_URL="https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer.ipa"
             LC_TAG="nightly"
           fi
 
-          echo "Downloading LiveContainer+SideStore ($LC_TAG): $IPA_URL"
-          curl -fL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors "$IPA_URL" -o build/lc/LiveContainer+SideStore.ipa
+          echo "Downloading standalone LiveContainer ($LC_TAG): $IPA_URL"
+          curl -fL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors "$IPA_URL" -o build/lc/LiveContainer.ipa
           echo "lc_tag=$LC_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Patch IPA with LCProxyTweak.dylib
+      - name: Patch & Clone LiveContainer IPA with LCProxyTweak.dylib
         run: |
           set -euo pipefail
           chmod +x scripts/patch_ipa.sh
+          CLONE_SUFFIX="${{ github.event.inputs.bundle_id_suffix || 'xray' }}"
+          CLONE_NAME="${{ github.event.inputs.app_display_name || 'LiveContainer Xray' }}"
           ./scripts/patch_ipa.sh \
-            build/lc/LiveContainer+SideStore.ipa \
+            build/lc/LiveContainer.ipa \
             build/LCProxyTweak.dylib \
             "${{ steps.xray.outputs.slice_dir }}" \
             build/insert_dylib \
-            build/LiveContainer+SideStore+XrayRust.ipa
+            build/LiveContainer-XrayRust-Clone.ipa \
+            "$CLONE_SUFFIX" \
+            "$CLONE_NAME"
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LiveContainer+SideStore+XrayRust
-          path: build/LiveContainer+SideStore+XrayRust.ipa
+          name: LiveContainer-XrayRust-Clone
+          path: build/LiveContainer-XrayRust-Clone.ipa
           retention-days: 30
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: LiveContainer+SideStore+XrayRust (#${{ github.run_number }})
+          name: LiveContainer Clone + XrayRust (#${{ github.run_number }})
           body: |
-            Автоматическая сборка **LiveContainer+SideStore** с внедрённым нативным прокси-твиком на базе **xray-rust**.
+            Автоматическая сборка **чистого LiveContainer (без SideStore)** в виде отдельного клона с внедрённым нативным прокси-твиком на базе **xray-rust**.
 
             - **XrayRust core release:** `${{ steps.xray.outputs.xray_tag }}`
-            - **LiveContainer base:** `${{ steps.lc.outputs.lc_tag }}`
-            - **Без VPN entitlements** — устанавливается через SideStore с бесплатным Apple ID.
-          files: build/LiveContainer+SideStore+XrayRust.ipa
+            - **LiveContainer base:** `${{ steps.lc.outputs.lc_tag }}` (`LiveContainer.ipa`, без SideStore)
+            - **Клон пакета:** `com.kdt.livecontainer.${{ github.event.inputs.bundle_id_suffix || 'xray' }}` (`${{ github.event.inputs.app_display_name || 'LiveContainer Xray' }}`) — ставится рядом с обычным LiveContainer.
+            - **Вызов меню прокси:** тройной тап **двумя пальцами** в любом месте экрана.
+            - **Без VPN entitlements** — устанавливается с бесплатным Apple ID.
+          files: build/LiveContainer-XrayRust-Clone.ipa

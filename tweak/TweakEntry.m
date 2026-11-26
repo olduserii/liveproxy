@@ -18,11 +18,18 @@ static void LCProxyTweakInitialize(void) {
         // 3. Start Watchdog (sleep/unlock notifications + NWPathMonitor + 20s heartbeat).
         [[LCWatchdog sharedWatchdog] startMonitoring];
 
-        // 4. Attach floating UIKit overlay once UIWindowScene becomes active.
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
-                                                          object:nil
-                                                           queue:[NSOperationQueue mainQueue]
-                                                      usingBlock:^(NSNotification *note) {
+        // 4. Attach 2-finger triple-tap menu gesture once active and whenever key window changes (guest apps).
+        NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+        [nc addObserverForName:UIApplicationDidBecomeActiveNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
+            [[LCProxyUI sharedUI] installOverlayIfNeeded];
+        }];
+        [nc addObserverForName:UIWindowDidBecomeKeyNotification
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
             [[LCProxyUI sharedUI] installOverlayIfNeeded];
         }];
     }
